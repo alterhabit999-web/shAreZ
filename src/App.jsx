@@ -859,6 +859,7 @@ function formatEventDate(timestamp) {
 // スレッドカード（一覧用）
 function ThreadCard({ thread, onClick }) {
   const cat = CATEGORY_MAP[thread.category] || CATEGORY_MAP.chat;
+  const isCompleted = thread.status === 'completed';
   return (
     <div
       onClick={onClick}
@@ -870,9 +871,10 @@ function ThreadCard({ thread, onClick }) {
         boxShadow: C.shadow,
         border: `1px solid ${C.border}`,
         cursor: onClick ? 'pointer' : 'default',
+        opacity: isCompleted ? 0.65 : 1,   // 完了したイベントは薄く表示
       }}
     >
-      <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 8 }}>
+      <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 8, flexWrap: 'wrap' }}>
         <span style={{
           fontSize: 11,
           fontWeight: 600,
@@ -883,6 +885,19 @@ function ThreadCard({ thread, onClick }) {
         }}>
           {cat.label}
         </span>
+        {isCompleted && (
+          <span style={{
+            fontSize: 11,
+            fontWeight: 700,
+            color: C.textSub,
+            backgroundColor: C.bg,
+            padding: '2px 8px',
+            borderRadius: 20,
+            border: `1px solid ${C.border}`,
+          }}>
+            ✅ 終了
+          </span>
+        )}
       </div>
       <h3 style={{ fontSize: 15, fontWeight: 600, color: C.text, marginBottom: 8 }}>
         {thread.title}
@@ -6629,7 +6644,8 @@ export default function App() {
 
   return (
     <div style={{
-      maxWidth: 430,
+      width: '100%',           // ← #root が flex column なので、明示的に 100% を指定して
+      maxWidth: 430,           //    コンテンツの文字数で幅が変動するのを防ぐ
       margin: '0 auto',
       minHeight: '100vh',
       backgroundColor: C.bg,
