@@ -1,0 +1,20 @@
+# 依存パッケージ（npm install で再生成できる）
+node_modules/
+
+# ビルド成果物
+/build
+
+# 環境変数（Firebaseの秘密情報 → 絶対にGitHubに上げない！）
+.env
+.env.local
+.env.development.local
+.env.test.local
+.env.production.local
+
+# ログ
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+
+# macOS 固有ファイル
+.DS_Store
