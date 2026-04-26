@@ -1,24 +1,239 @@
 rules_version = '2';
 
 // ============================================================
-// ShareAZ Firestore セキュリティルール（暫定版 / B案）
+// ShareAZ Firestore セキュリティルール（本番運用版）
 // ------------------------------------------------------------
-// 方針：
-//   - テストモード（誰でも読み書き可・30日で失効）からの卒業が目的
-//   - 「ログイン済みユーザーのみ全データを読み書き可」という最小ルール
-//   - 外部からの匿名アクセスは完全に遮断される
-//   - 社内ユーザー間の改ざん（role/azCoins書き換え等）は防げない
-//     → 次フェーズ（スレッド機能完成後）で本格ルール化する予定
+// 反映方法：
+//   Firebase Console → Firestore → Rules タブにこの内容を貼り付け、「公開」
+//   または `firebase deploy --only firestore:rules`（CLI連携時）
+//
+// 設計方針：
+//   1. 認証ユーザーのみアクセス可。匿名アクセスは全拒否
+//   2. admin 判定は users/{uid}.role == 'admin' を get() で参照
+//   3. ユーザー自身の users 文書はプロフィール項目のみ更新可
+//      （azCoins は減少のみ＝ショップ申請のため）
+//   4. ユーザー自身の shopItems.stock は -1 のみ更新可
+//      （ショップ申請の在庫引き当てのため）
+//   5. coinTransactions 作成は admin OR 本人のマイナスのみ
+//   6. その他はコレクション別に細かく制御
+//
+// 既知のトレードオフ：
+//   - isAdmin() は get() を呼ぶので、admin の writeBatch（イベント完了処理など）
+//     では参加者数 +1 回ぶんの doc 読み取りが発生する。MVP規模では許容範囲。
+//     将来は Firebase Auth カスタムクレームに移行を検討。
+//   - ユーザーが自分のコインを「無駄に減らす」のは技術的に可能だが、
+//     攻撃インセンティブがないため許容。
 // ============================================================
 
 service cloud.firestore {
   match /databases/{database}/documents {
 
-    // すべてのコレクション・サブコレクションに適用
-    // request.auth が null（未ログイン）なら deny
-    match /{document=**} {
-      allow read, write: if request.auth != null;
+    // ============================================================
+    // ヘルパー関数
+    // ============================================================
+    function isAuthed() {
+      return request.auth != null;
     }
 
+    function isOwner(userId) {
+      return isAuthed() && request.auth.uid == userId;
+    }
+
+    // admin 判定：自分の users 文書の role を参照
+    function isAdmin() {
+      return isAuthed()
+        && exists(/databases/$(database)/documents/users/$(request.auth.uid))
+        && get(/databases/$(database)/documents/users/$(request.auth.uid)).data.role == 'admin';
+    }
+
+    // 変更されたフィールドのキー集合
+    function changedKeys() {
+      return request.resource.data.diff(resource.data).affectedKeys();
+    }
+
+    // 指定したフィールドだけが変更された
+    function onlyChanged(fields) {
+      return changedKeys().hasOnly(fields);
+    }
+
+    // ============================================================
+    // users / ユーザープロフィール
+    // ============================================================
+    match /users/{userId} {
+      // 読み取り：認証ユーザー全員
+      allow read: if isAuthed();
+
+      // 作成：本人のみ。role は member 固定（admin 昇格は admin の更新経由）
+      allow create: if isOwner(userId)
+                    && request.resource.data.role == 'member';
+
+      // 更新：
+      //  パターンA: 本人 + プロフィール項目のみ
+      //  パターンB: 本人 + azCoins 減少のみ（ショップ申請）
+      //  パターンC: admin（全項目自由）
+      allow update: if (
+        isOwner(userId) && (
+          onlyChanged(['name', 'department', 'bio', 'avatarUrl', 'tags', 'favoriteUserIds', 'updatedAt'])
+          ||
+          (
+            onlyChanged(['azCoins'])
+            && request.resource.data.azCoins < resource.data.azCoins
+            && request.resource.data.azCoins >= 0
+          )
+        )
+      ) || isAdmin();
+
+      // 削除：admin のみ
+      allow delete: if isAdmin();
+    }
+
+    // ============================================================
+    // tags / タグマスタ
+    // ============================================================
+    match /tags/{tagId} {
+      allow read: if isAuthed();
+      allow create, update: if isAuthed();
+      allow delete: if isAdmin();
+    }
+
+    // ============================================================
+    // threads / 掲示板スレッド
+    // ============================================================
+    match /threads/{threadId} {
+      allow read: if isAuthed();
+
+      // 作成：authorId が自分
+      allow create: if isAuthed()
+                    && request.resource.data.authorId == request.auth.uid;
+
+      // 更新：作成者本人 OR admin（全項目）
+      //       OR 認証ユーザー（カウンタ系のみ）
+      allow update: if isAuthed() && (
+        resource.data.authorId == request.auth.uid
+        || isAdmin()
+        || onlyChanged(['participantCount', 'commentCount', 'interestedCount', 'updatedAt'])
+      );
+
+      // 削除：admin のみ（作成者は deletionRequests 経由で申請する設計）
+      allow delete: if isAdmin();
+    }
+
+    // ============================================================
+    // 参加申請（threads サブコレクション）
+    // ※ {path=**} を使って collectionGroup クエリにも対応
+    //    （MyEventsSection で collectionGroup('participations') を使用）
+    // ============================================================
+    match /{path=**}/participations/{userId} {
+      allow read: if isAuthed();
+      allow create: if isOwner(userId);
+      allow delete: if isOwner(userId) || isAdmin();
+      allow update: if false;
+    }
+
+    // ============================================================
+    // コメント（threads サブコレクション）
+    // ============================================================
+    match /{path=**}/comments/{commentId} {
+      allow read: if isAuthed();
+      allow create: if isAuthed()
+                    && request.resource.data.authorId == request.auth.uid;
+      // MVP では編集不可。スレッド削除に伴うサブコレクション削除は admin。
+      allow update: if false;
+      allow delete: if isAdmin();
+    }
+
+    // ============================================================
+    // 興味あり（threads サブコレクション）
+    // ============================================================
+    match /{path=**}/interested/{userId} {
+      allow read: if isAuthed();
+      allow create: if isOwner(userId);
+      allow delete: if isOwner(userId) || isAdmin();
+      allow update: if false;
+    }
+
+    // ============================================================
+    // coinTransactions / AZコイン異動履歴
+    // ============================================================
+    match /coinTransactions/{txId} {
+      // 読み取り：本人 or admin
+      allow read: if isAuthed() && (
+        resource.data.userId == request.auth.uid || isAdmin()
+      );
+
+      // 作成：
+      //   - admin（イベント完了・手動付与・却下返金）
+      //   - 本人 + amount < 0（ショップ申請の支出記録）
+      allow create: if isAuthed() && (
+        isAdmin()
+        || (
+          request.resource.data.userId == request.auth.uid
+          && request.resource.data.amount < 0
+        )
+      );
+
+      // 通常は不変。修正・削除は admin のみ。
+      allow update, delete: if isAdmin();
+    }
+
+    // ============================================================
+    // shopItems / ノベルティ商品
+    // ============================================================
+    match /shopItems/{itemId} {
+      allow read: if isAuthed();
+
+      allow create, delete: if isAdmin();
+
+      // 更新：admin（自由）OR 認証ユーザー（stock を -1 のみ・元残>0）
+      allow update: if isAuthed() && (
+        isAdmin()
+        || (
+          onlyChanged(['stock'])
+          && request.resource.data.stock == resource.data.stock - 1
+          && resource.data.stock > 0
+        )
+      );
+    }
+
+    // ============================================================
+    // exchangeRequests / 交換申請
+    // ============================================================
+    match /exchangeRequests/{reqId} {
+      allow read: if isAuthed() && (
+        resource.data.userId == request.auth.uid || isAdmin()
+      );
+
+      // 作成：本人のみ、status は pending、自分の userId
+      allow create: if isAuthed()
+                    && request.resource.data.userId == request.auth.uid
+                    && request.resource.data.status == 'pending';
+
+      // 更新・削除：admin のみ（承認 / 却下）
+      // ユーザー側からの取り消しは仕様で不可
+      allow update, delete: if isAdmin();
+    }
+
+    // ============================================================
+    // deletionRequests / スレッド削除申請
+    // ============================================================
+    match /deletionRequests/{reqId} {
+      allow read: if isAuthed() && (
+        resource.data.requesterId == request.auth.uid || isAdmin()
+      );
+
+      // 作成：本人のみ
+      allow create: if isAuthed()
+                    && request.resource.data.requesterId == request.auth.uid;
+
+      // 更新・削除：admin のみ
+      allow update, delete: if isAdmin();
+    }
+
+    // ============================================================
+    // 上記に該当しないパスは全拒否（Firestore のデフォルト挙動と同じ・明示）
+    // ============================================================
+    match /{document=**} {
+      allow read, write: if false;
+    }
   }
 }
