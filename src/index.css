@@ -1,0 +1,31 @@
+* {
+  box-sizing: border-box;
+  margin: 0;
+  padding: 0;
+}
+
+html {
+  /* スクロールバーの出現/非表示で画面幅が変わるのを防止
+     （長い画面=スクロールあり / 短い画面=スクロールなし で
+      ヘッダーの幅が画面ごとに変わるのを防ぐ） */
+  scrollbar-gutter: stable;
+  /* 横スクロールは原則発生させない */
+  overflow-x: hidden;
+}
+
+body {
+  font-family: 'Noto Sans JP', 'Noto Sans', system-ui, -apple-system, 'Segoe UI', Roboto, Helvetica, Arial, sans-serif;
+  font-size: 16px;
+  line-height: 1.5;
+  letter-spacing: -0.4px;
+  background-color: #f8f6f2;
+  color: #0f0f0f;
+  -webkit-font-smoothing: antialiased;
+  -moz-osx-font-smoothing: grayscale;
+}
+
+#root {
+  min-height: 100vh;
+  display: flex;
+  flex-direction: column;
+}

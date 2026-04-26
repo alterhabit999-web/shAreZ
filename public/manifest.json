@@ -1,0 +1,9 @@
+{
+  "short_name": "ShareAZ",
+  "name": "ShareAZ - 社内コミュニティSNS",
+  "icons": [],
+  "start_url": "/ShareAZ",
+  "display": "standalone",
+  "theme_color": "#f28c06",
+  "background_color": "#f8f6f2"
+}

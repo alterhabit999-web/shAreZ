@@ -1,0 +1,53 @@
+rules_version = '2';
+
+// ShareAZ Storage Security Rules
+// 反映方法：Firebase Console → Storage → Rules タブ にこの内容を貼り付けて「公開」
+// ※ Firebase CLI 連携後は `firebase deploy --only storage` でも反映可能
+
+service firebase.storage {
+  match /b/{bucket}/o {
+
+    // ============================================================
+    // アバター画像
+    // パス: avatars/{userId}/profile.jpg
+    // ============================================================
+    match /avatars/{userId}/{fileName} {
+      // 読み取り：認証ユーザー全員
+      allow read: if request.auth != null;
+
+      // 書き込み（作成・更新）：本人のみ
+      // - 5MB 以下
+      // - image/* のみ（JPEG / PNG / WebP など）
+      allow write: if request.auth != null
+                   && request.auth.uid == userId
+                   && request.resource.size < 5 * 1024 * 1024
+                   && request.resource.contentType.matches('image/.*');
+
+      // 削除：本人のみ
+      allow delete: if request.auth != null && request.auth.uid == userId;
+    }
+
+    // ============================================================
+    // ショップ商品画像
+    // パス: shop/{itemId}/main.jpg
+    // ============================================================
+    // ※ 厳密には admin のみ書き込み可にしたいが、Storage Rules から
+    //    Firestore の users.role を直接参照するには resource アクセスが必要で
+    //    ルールが複雑になるため、MVP では「認証ユーザーなら可」とする。
+    //    将来：Firebase Auth カスタムクレーム（admin: true）に切替予定。
+    match /shop/{itemId}/{fileName} {
+      allow read: if request.auth != null;
+      allow write: if request.auth != null
+                   && request.resource.size < 5 * 1024 * 1024
+                   && request.resource.contentType.matches('image/.*');
+      allow delete: if request.auth != null;
+    }
+
+    // ============================================================
+    // それ以外のパスは全て拒否
+    // ============================================================
+    match /{allPaths=**} {
+      allow read, write: if false;
+    }
+  }
+}
