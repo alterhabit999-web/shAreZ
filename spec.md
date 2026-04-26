@@ -1,9 +1,9 @@
 # ShareAZ 仕様書
 
-**バージョン**: v1.4
+**バージョン**: v1.5
 **作成日**: 2026-04-24
 **更新日**: 2026-04-26
-**ステータス**: フェーズ1 ほぼ完成（ポイント交換機能まで実装。Firebase Storage / GitHub 連携 / 本番セキュリティルールが残課題）
+**ステータス**: フェーズ1 ほぼ完成・**本番公開済み**（GitHub Pages 稼働中）。Firestore 本番セキュリティルール本格化が次の主要課題。
 
 ---
 
@@ -26,7 +26,7 @@
 - 将来：1,000人以上
 
 ### 目標
-- フェーズ1：基本SNS機能（プロフィール・タグ検索・掲示板）+ AZコイン・ポイント交換 → ほぼ完成
+- フェーズ1：基本SNS機能（プロフィール・タグ検索・掲示板）+ AZコイン・ポイント交換 → 本番公開済み
 - フェーズ2：イベント作成承認制 / データ集計 / 通知
 - フェーズ3：スケール対応（1,000人以上）
 
@@ -50,7 +50,7 @@
 | 1 | 氏名 | テキスト | 必須 | 表示名 |
 | 2 | 所属部署 | テキスト | 任意 | チーム・部署名 |
 | 3 | 自己紹介 | テキスト（長文） | 任意 | 自由記述 |
-| 4 | アイコン画像 | 画像アップロード | 任意 | Firebase Storage 保存（未実装：次フェーズ） |
+| 4 | アイコン画像 | 外部URL（暫定） | 任意 | Firebase Storage 利用は Blaze プラン移行待ち |
 | 5 | タグ | 複数選択（自由入力） | 任意 | 例：「ゲーム」「デザイン」「料理」 |
 | 6 | AZコイン残高 | 数値（表示のみ） | - | 自動更新 |
 
@@ -191,7 +191,7 @@
 | コイン・在庫の減算タイミング | 申請時に即減算（writeBatch でアトミック） |
 | 申請取り消し | ユーザー側からは不可（申請前に確認モーダルで注意喚起） |
 | 却下処理 | 管理者却下のみで返金 + 在庫戻し（無制限商品 stock=-1 は戻し不要） |
-| 商品画像 | 当面は外部URL手入力（Firebase Storage 有効化後に切替予定） |
+| 商品画像 | **当面は外部URL手入力**（Firebase Storage は Blaze プラン必須のため後回し） |
 | 在庫無制限 | `stock = -1` で表現、UI上は「在庫: ∞」表示 |
 | 商品の非公開 | `isActive: false` でユーザー一覧から除外 |
 | 商品削除 | 既存の交換申請レコードは残る（itemName/itemImageUrl/coinCost を非正規化保持） |
@@ -350,10 +350,10 @@ Firestore
 │       ├── name: string
 │       ├── department: string
 │       ├── bio: string
-│       ├── avatarUrl: string
+│       ├── avatarUrl: string      ← 当面は外部URL手入力（Storage は Blaze 移行時）
 │       ├── role: "admin" | "member"
 │       ├── azCoins: number
-│       ├── tags: string[]         ← タグは配列で持つ（例：["ゲーム", "料理"]）
+│       ├── tags: string[]
 │       ├── eventCount: number     ← 完了イベントへの参加累計（ランク判定用）
 │       ├── hostCount: number      ← 完了イベントの主催累計（ランク判定用）
 │       ├── favoriteUserIds: string[] ← お気に入りメンバーのuserId配列（自分専用）
@@ -362,91 +362,82 @@ Firestore
 │
 ├── tags/                          ← タグマスタ（全タグの一覧 / オートコンプリート用）
 │   └── {tagId}/
-│       ├── name: string           ← タグ名（例："ゲーム"）
+│       ├── name: string
 │       └── createdAt: timestamp
 │
 ├── threads/                       ← 掲示板スレッド（告知・イベント）
 │   └── {threadId}/
-│       ├── authorId: string
-│       ├── authorName: string     ← 非正規化、表示高速化
-│       ├── title: string
-│       ├── body: string
+│       ├── authorId, authorName
+│       ├── title, body
 │       ├── category: "announcement" | "event"
 │       ├── tags: string[]
-│       ├── eventDate: timestamp | null  ← イベントカテゴリのみ
-│       ├── capacity: number       ← 0=無制限、イベントのみ
+│       ├── eventDate, capacity（イベントのみ）
 │       ├── status: "open" | "closed" | "completed"
-│       ├── participantCount: number
-│       ├── commentCount: number
-│       ├── interestedCount: number
+│       ├── participantCount, commentCount, interestedCount
 │       ├── promotedFrom: "announcement" | null
 │       ├── isOfficial: boolean
-│       ├── createdAt: timestamp
-│       ├── updatedAt: timestamp
-│       ├── participations/        ← サブコレクション（参加申請、イベントのみ）
-│       │   └── {userId}/
-│       │       ├── userId: string
-│       │       ├── status: "pending" | "approved" | "rejected"
-│       │       └── createdAt: timestamp
+│       ├── createdAt, updatedAt
+│       ├── participations/        ← サブコレクション
 │       ├── comments/              ← サブコレクション
-│       │   └── {commentId}/
-│       │       ├── authorId, authorName, body
-│       │       └── createdAt: timestamp
-│       └── interested/            ← サブコレクション（告知のみ）
-│           └── {userId}/
-│               └── createdAt: timestamp
+│       └── interested/            ← サブコレクション
 │
 ├── deletionRequests/              ← スレッド削除申請
 │   └── {requestId}/
 │       ├── threadId, threadTitle
 │       ├── requesterId, requesterName
-│       ├── reason: string
-│       ├── status: "pending" | "approved" | "rejected"
-│       ├── rejectionReason: string  ← 却下時のみ
+│       ├── reason, status
+│       ├── rejectionReason
 │       ├── processedBy, processedAt
-│       └── createdAt: timestamp
+│       └── createdAt
 │
 ├── coinTransactions/              ← AZコイン異動履歴
 │   └── {transactionId}/
-│       ├── userId: string
-│       ├── userName: string         ← 非正規化、表示用
-│       ├── amount: number           ← プラスで付与、マイナスで消費
-│       ├── reason: string           ← 'イベント参加' | 'イベント主催' | '🛍️「…」を交換申請' | '🛍️「…」交換却下による返金' | admin入力
-│       ├── grantedBy: string        ← admin の userId / 'system'（自動付与）
-│       ├── relatedThreadId: string  ← 関連イベントID（任意）
-│       ├── relatedRequestId: string ← 交換申請関連ID（任意・v7 追加）
-│       └── createdAt: timestamp
+│       ├── userId, userName
+│       ├── amount: number         ← 正負両対応
+│       ├── reason: string         ← 'イベント参加' / 'イベント主催' / '🛍️…交換申請' / '🛍️…交換却下による返金' / admin入力
+│       ├── grantedBy: string      ← admin の userId / 'system'
+│       ├── relatedThreadId, relatedRequestId
+│       └── createdAt
 │
 ├── shopItems/                     ← ノベルティ商品（v7 で稼働）
 │   └── {itemId}/
-│       ├── name: string
-│       ├── description: string
-│       ├── imageUrl: string         ← 当面は外部URL（Storage 有効化後に切替）
+│       ├── name, description
+│       ├── imageUrl: string         ← 当面は外部URL（Storage は Blaze 移行時）
 │       ├── coinCost: number         ← 必要コイン数（1以上の整数）
 │       ├── stock: number            ← -1 = 無制限 / 0 以上 = 残数
-│       ├── isActive: boolean        ← false でユーザー側非表示
-│       ├── createdAt: timestamp
-│       └── updatedAt: timestamp
+│       ├── isActive: boolean
+│       └── createdAt, updatedAt
 │
 └── exchangeRequests/              ← 交換申請（v7 で稼働）
     └── {requestId}/
-        ├── userId: string
-        ├── userName: string         ← 非正規化（管理画面表示用）
-        ├── itemId: string
-        ├── itemName: string         ← 商品スナップショット（商品削除後も表示維持）
-        ├── itemImageUrl: string     ← 商品スナップショット
-        ├── coinCost: number         ← 申請時の価格スナップショット
+        ├── userId, userName
+        ├── itemId, itemName, itemImageUrl  ← 商品スナップショット
+        ├── coinCost: number       ← 申請時の価格スナップショット
         ├── status: "pending" | "approved" | "rejected"
-        ├── rejectionReason: string  ← 却下時のみ
-        ├── processedBy: string      ← 処理した admin の userId
-        ├── processedAt: timestamp
-        └── createdAt: timestamp
+        ├── rejectionReason
+        ├── processedBy, processedAt
+        └── createdAt
 ```
 
 ### セキュリティルール方針（Firestore Security Rules）
 
 > Firestore Security Rules は「誰がどのデータを読み書きできるか」のルールです。  
-> ※ 現状は暫定ルール（認証ユーザーのみアクセス可）。本格運用ルールは次フェーズで実装。
+> ※ 現状は暫定ルール（認証ユーザー全許可）。**本番セキュリティルールへの昇格が次フェーズの最優先課題**。
+
+#### 暫定ルール（現状）
+
+```javascript
+rules_version = '2';
+service cloud.firestore {
+  match /databases/{database}/documents {
+    match /{document=**} {
+      allow read, write: if request.auth != null;
+    }
+  }
+}
+```
+
+#### 目標ルール（次フェーズで実装）
 
 | コレクション | 読み取り | 書き込み |
 |-------------|----------|----------|
@@ -458,6 +449,8 @@ Firestore
 | shopItems | 認証ユーザー全員 | Admin のみ |
 | exchangeRequests | 本人＋Admin | 本人のみ（申請作成）/ Admin のみ（status更新） |
 | deletionRequests | 本人＋Admin | 本人のみ（申請作成）/ Admin のみ（status更新） |
+
+Admin 判定は `users/{uid}.role == 'admin'` を Rules から `get()` で参照する方式で開始予定（カスタムクレーム移行は将来）。
 
 ### Firestore 複合インデックス対応
 
@@ -474,23 +467,28 @@ return onSnapshot(q, snap => {
 
 この方針は `MyExchangeSection` `MyEventsSection` で採用。スケール時は本番インデックスに切替。
 
-### Firebase Storage 構成（次フェーズで有効化予定）
+### Firebase Storage 構成（Blaze プラン移行時に有効化）
 
 ```
 Firebase Storage
 ├── avatars/{userId}/profile.jpg   ← プロフィールアイコン
-└── shop/{itemId}/image.jpg        ← ショップアイテム画像
+└── shop/{itemId}/main.jpg         ← ショップアイテム画像
 ```
+
+> **現状**：新規 Firebase プロジェクトでは Storage が **Blaze（従量課金）プラン必須** に変わったため、Spark（無料）プランでは利用不可。実装は中止し、当面は外部URL運用。`storage.rules` ファイルはリポジトリに保持済み（移行時にコピペで利用可能）。
 
 ---
 
 ## 5. 技術方針
 
-### フェーズ1：Webアプリ MVP
+### フェーズ1：Webアプリ MVP（**本番公開済み**）
+
 - **フロントエンド**：React（Create React App）
-- **バックエンド**：Firebase（Firestore・Authentication・Security Rules / Storage は次フェーズ有効化）
-- **ホスティング**：GitHub Pages（連携は次フェーズ）
-- **公開URL**：`https://[GitHubユーザー名].github.io/ShareAZ`
+- **バックエンド**：Firebase（Firestore・Authentication・Security Rules）
+- **ホスティング**：GitHub Pages（運用中）
+- **本番URL**：https://alterhabit999-web.github.io/shAreZ/
+- **GitHub リポジトリ**：https://github.com/alterhabit999-web/shAreZ（Public）
+- **デプロイコマンド**：`npm run deploy`（build → gh-pages ブランチへ自動 push）
 
 ### 使用するFirebaseサービス
 
@@ -498,7 +496,7 @@ Firebase Storage
 |---------|------|------|
 | Firebase Authentication | ログイン・サインアップ（メール＋パスワード） | ✅ 稼働中 |
 | Cloud Firestore | データ保存（ユーザー・スレッド・コイン・商品など） | ✅ 稼働中 |
-| Firebase Storage | 画像ファイル保存（アイコン・ノベルティ画像） | ⏸ 次フェーズ |
+| Firebase Storage | 画像ファイル保存（アイコン・ノベルティ画像） | ⛔ 中止（Blaze プラン必須・移行時に再開） |
 | Security Rules | データアクセス制御 | ⚠️ 暫定（次フェーズで本格化） |
 
 ### フェーズ1.5：PWA対応
@@ -543,11 +541,13 @@ Firebase Storage
 
 | 項目 | 内容 |
 |------|------|
-| コード管理 | GitHub（リポジトリ未作成） |
-| データ | Firebase（プロジェクト作成済み） |
-| ホスティング | GitHub Pages（未連携） |
+| コード管理 | GitHub: [alterhabit999-web/shAreZ](https://github.com/alterhabit999-web/shAreZ)（Public） |
+| データ | Firebase（プロジェクト稼働中） |
+| ホスティング | GitHub Pages: https://alterhabit999-web.github.io/shAreZ/ |
+| Firebase 認証ドメイン | `alterhabit999-web.github.io` 追加済み |
 | 開発ツール | Cowork + Macターミナル |
 | アプリフォルダ | `~/Documents/App/ShareAZ` |
+| Git ブランチ運用 | `main`（ソース） / `gh-pages`（ビルド成果物・自動生成） |
 
 ### 必要なnpmパッケージ
 
@@ -556,22 +556,25 @@ npm install firebase
 npm install gh-pages --save-dev
 ```
 
-### ファイル構成（v7 時点）
+### ファイル構成（v8 時点）
 
 ```
 ShareAZ/
 ├── public/
 │   ├── index.html
-│   ├── manifest.json
-│   └── sw.js
+│   └── manifest.json
 ├── src/
 │   ├── App.jsx           # メインコード（全画面・状態管理、約6,640行）
 │   ├── firebase.js       # Firebaseクライアント初期化
 │   ├── index.js
 │   └── index.css
 ├── .env                  # Firebase接続情報（GitHubには上げない）
+├── .env.example
+├── .gitignore
 ├── firestore.rules
-└── package.json
+├── storage.rules         # 未使用（Blaze プラン移行時用）
+├── package.json          # homepage: https://alterhabit999-web.github.io/shAreZ
+└── package-lock.json
 ```
 
 ### 環境変数（.env）
@@ -592,42 +595,52 @@ REACT_APP_FIREBASE_APP_ID=...
 ```bash
 # ローカルで確認
 cd ~/Documents/App/ShareAZ
-npm start
+npm start                              # http://localhost:3000/shAreZ
 
-# 本番反映（GitHub Pages にデプロイ・連携後）
-git add .
+# GitHub にコード反映（履歴管理）
+git add <files>
 git commit -m "変更内容のメモ"
 git push origin main
-npm run deploy
+
+# 本番反映（GitHub Pages へ）
+npm run deploy                         # build → gh-pages ブランチへ自動 push
+
+# GitHub Pages のビルド状態確認
+gh api repos/alterhabit999-web/shAreZ/pages --jq '.status'
 ```
+
+`git push origin main` と `npm run deploy` は別の処理：
+
+- `git push origin main` → ソースを GitHub の `main` ブランチに保存（履歴・コードレビュー用）
+- `npm run deploy` → CRA build 結果を `gh-pages` ブランチへ上げて GitHub Pages から配信
+
+両方やるのが基本フロー。
 
 ---
 
 ## 9. 将来追加機能メモ
 
-- [ ] **Firebase Storage 有効化**：アバター画像・商品画像のアップロード（次回最優先）
-- [ ] **GitHub リポジトリ作成・GitHub Pages デプロイ連携**
-- [ ] **Firestore セキュリティルールの本格運用化**
-- [ ] **イベント作成の管理者承認制**：新規/告知からの作成いずれも、管理者承認後に公開（`eventCreationRequests/`）
+- [ ] **Firestore セキュリティルールの本格運用化**（次回最優先）
+- [ ] **イベント作成の管理者承認制**（`eventCreationRequests/` コレクション新設）
+- [ ] **管理画面：データ集計タブ**（CSV出力・参加率統計）
 - [ ] コメント編集・削除機能（MVPは投稿のみ）
-- [ ] スレッド削除の管理者承認フロー → 既存（v6 で実装済み）
 - [ ] 通知機能（イベント参加者へのお知らせ）
 - [ ] コイン付与の自動化（イベント完了を自動判定）
 - [ ] 初回プロフィール設定+5コインの自動付与
 - [ ] ランキング機能（月間コイン獲得ランキング）
 - [ ] 部署・チーム単位でのグループ機能
 - [ ] メンバー機能フェーズ2：共参加回数表示・チーム機能
-- [ ] 管理画面：データ集計タブ（CSV出力・参加率統計）
+- [ ] **Firebase Storage 機能**（Blaze プラン移行後にアバター・商品画像アップロード対応）
 - [ ] 在庫超過の race condition 対策（`runTransaction` 化）
+- [ ] PWA 化（manifest + Service Worker）
 
 ---
 
 ## 10. 未決定事項
 
-- [ ] GitHubアカウント名（リポジトリ作成時に必要）
-- [ ] FirebaseプロジェクトのAPIキー・設定（プロジェクト作成済み）
 - [ ] ノベルティ商品ラインアップ（品目・価格・在庫数）
-- [ ] アバター・商品画像のサイズ制限・許可拡張子（Storage 設計時に決定）
+- [ ] Firestore セキュリティルールでの admin 判定方式（A: get() 参照 / B: カスタムクレーム）
+- [ ] Blaze プラン移行のタイミング（Storage 利用 / 集計クエリのスケール対策など）
 
 ---
 
@@ -639,4 +652,5 @@ npm run deploy
 | v1.1 | 2026-04-24 | バックエンドを Supabase → Firebase に変更。データ設計をFirestore形式に更新 |
 | v1.2 | 2026-04-24 | デザインシステムを確定（DESIGN.md）。フォルダパスを ShareAZ に修正 |
 | v1.3 | 2026-04-25 | 大型仕様変更：①雑談カテゴリ廃止、②告知→イベントの昇華フロー、③コメント機能、④「興味あり」リアクション、⑤スレッドにタグ機能、⑥タグフィルタはボトムシート方式、⑦ホーム画面で公式お知らせ優先表示、⑧管理画面（Admin専用）追加、⑨マイページに参加履歴・ランクバッジ、⑩メンバー機能拡張、⑪メンバーランク機能、⑫ボトムナビ順序変更 |
-| v1.4 | 2026-04-26 | ポイント交換機能の本実装を反映：①ボトムナビ「ショップ」→「ポイント交換」改称、②`shopItems/` `exchangeRequests/` のデータ構造を実装に合わせて確定、③申請時即減算・却下時返金のアトミック処理を仕様化、④管理画面に「ノベルティ」「交換申請」タブ追加（合計7タブ・4列グリッドUI）、⑤マイページに交換申請履歴セクション追加、⑥Firestore複合インデックス回避パターンを明文化、⑦Firebase Storage / GitHub連携 / セキュリティルール本格化を残課題として整理 |
+| v1.4 | 2026-04-26 | ポイント交換機能の本実装を反映：①ボトムナビ「ショップ」→「ポイント交換」改称、②`shopItems/` `exchangeRequests/` 確定、③申請時即減算・却下時返金のアトミック処理、④管理画面に「ノベルティ」「交換申請」タブ追加（合計7タブ）、⑤マイページに交換申請履歴セクション追加、⑥Firestore複合インデックス回避パターンを明文化 |
+| v1.5 | 2026-04-26 | 本番公開・運用環境の確定：①GitHub リポジトリ `alterhabit999-web/shAreZ`（Public）作成、②GitHub Pages へデプロイ運用開始（本番URL: `https://alterhabit999-web.github.io/shAreZ/`）、③Firebase Authorized domains に本番ドメイン追加、④Firebase Storage は Blaze プラン必須のため実装中止（外部URL運用継続、storage.rules はリポジトリに保持）、⑤デプロイフロー（`git push` と `npm run deploy` の使い分け）を仕様化 |
